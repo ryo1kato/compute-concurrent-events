@@ -13,10 +13,7 @@ import (
 	"strings"
 )
 
-// Assume all transactions to be processed spans within 10^6 = 12 days period
-// so that we can handle timestamps with int64 without loosing precision.
-//const SECS_DIGITS = 6
-//const FLOAT_PRECISION = 1000000 //micro-sec
+const BUFSIZE = 4096
 
 /* Priority Queue boiler-plate */
 type Transaction struct {
@@ -27,19 +24,23 @@ type Transaction struct {
 
 type QIFHeap []*Transaction
 
-func (h QIFHeap) Len() int           { return len(h) }
-func (h QIFHeap) Peek() *Transaction { return h[0] }
-func (h QIFHeap) Less(i, j int) bool { return h[i].endtime < h[j].endtime }
-func (h QIFHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *QIFHeap) Push(x interface{}) {
-	*h = append(*h, x.(*Transaction))
-}
+func (h QIFHeap) Len() int            { return len(h) }
+func (h QIFHeap) Peek() *Transaction  { return h[0] }
+func (h QIFHeap) Less(i, j int) bool  { return h[i].endtime < h[j].endtime }
+func (h QIFHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
+func (h *QIFHeap) Push(x interface{}) { *h = append(*h, x.(*Transaction)) }
 func (h *QIFHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
 	*h = old[0 : n-1]
 	return x
+}
+
+type QIF struct {
+	tr    *Transaction
+	qif   int
+	extra string
 }
 
 func errExit(msg string, code ...int) {
@@ -83,24 +84,36 @@ func parseTimeMicroSec(s string) (int64, error) {
 	return secs, nil
 }
 
-func printQIF(tr *Transaction, qif int, extra string) {
+func printQIF(w *bufio.Writer, tr *Transaction, qif int, extra string) {
 	s := strconv.FormatInt(tr.starttime, 10)
-	e := strconv.FormatInt(tr.endtime, 10)
-	var comma string
-	if len(extra) > 0 {
-		comma = ","
-	} else {
-		comma = ""
-	}
-	fmt.Printf("%s.%s,%s.%s,%d%s%s\n",
-		s[:len(s)-6], s[len(s)-6:], e[:len(s)-6], e[len(s)-6:], qif, comma, extra)
+	q := strconv.FormatInt(int64(qif), 10)
+	//e := strconv.FormatInt(tr.endtime, 10)
+
+	w.Write([]byte(s[:len(s)-6]))
+	w.Write([]byte("."))
+	w.Write([]byte(s[len(s)-6:]))
+	w.Write([]byte(","))
+	w.Write([]byte(q))
+	w.Write([]byte("\n"))
 }
 
 func main() {
-	r := csv.NewReader(bufio.NewReader(os.Stdin))
+	r := csv.NewReader(bufio.NewReaderSize(os.Stdin, BUFSIZE))
+	w := bufio.NewWriterSize(os.Stdout, BUFSIZE)
 
 	pq := &QIFHeap{}
 	heap.Init(pq)
+
+	//input = make(chan (record []string, err error), BUFSIZE)
+	output := make(chan QIF, BUFSIZE)
+	sync := make(chan bool)
+
+	go func() {
+		for qif := range output {
+			printQIF(w, qif.tr, qif.qif, qif.extra)
+		}
+		sync <- true
+	}()
 
 	lineNo := 1
 	prev := int64(0)
@@ -130,15 +143,19 @@ func main() {
 		}
 		newTr := &Transaction{start, end}
 		heap.Push(pq, newTr)
-		printQIF(newTr, pq.Len(), "")
+		//printQIF(newTr, pq.Len(), "")
+		output <- QIF{newTr, pq.Len(), ""}
 
 		lineNo++
 	}
+	close(output)
 	/*
 		for pq.Len() > 0 {
 			transaction := heap.Pop(pq).(*Transaction)
 			printQIF(transaction, pq.Len(), "")
 		}
 	*/
+	<-sync
+	w.Flush()
 	os.Exit(0)
 }
