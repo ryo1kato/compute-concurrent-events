@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-const BUFSIZE = 4096
+const BUFSIZE = 512
 
 /* Priority Queue boiler-plate */
 type Transaction struct {
@@ -143,7 +143,7 @@ func main() {
 		}
 		newTr := &Transaction{start, end}
 		heap.Push(pq, newTr)
-		//printQIF(newTr, pq.Len(), "")
+		//printQIF(w, newTr, pq.Len(), "")
 		output <- QIF{newTr, pq.Len(), ""}
 
 		lineNo++
