@@ -104,7 +104,7 @@ func main() {
 	pq := &QIFHeap{}
 	heap.Init(pq)
 
-	//input = make(chan (record []string, err error), BUFSIZE)
+    input := make(chan []string, BUFSIZE)
 	output := make(chan QIF, BUFSIZE)
 	sync := make(chan bool)
 
@@ -115,14 +115,21 @@ func main() {
 		sync <- true
 	}()
 
+    go func() {
+        for {
+            record, err := r.Read()
+            if err == io.EOF {
+                close(input)
+                return
+            }
+            exitIfError(err)
+            input <- record
+        }
+    } ()
+
 	lineNo := 1
 	prev := int64(0)
-	for {
-		record, err := r.Read()
-		if err == io.EOF {
-			break
-		}
-		exitIfError(err)
+    for record := range input {
 		if len(record) < 2 {
 			msg := "Less than 2 columns in the input at line %d"
 			errExit(fmt.Sprintf(msg, lineNo))
